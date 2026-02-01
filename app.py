@@ -2,101 +2,93 @@ import streamlit as st
 from pypdf import PdfWriter, PdfReader
 from PIL import Image, ImageOps
 import io
+from streamlit_sortables import sort_items # 순서 변경 도구 추가
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="순서 변경 가능한 PDF 병합기", page_icon="📑")
+st.set_page_config(page_title="드래그로 순서 변경", page_icon="🖱️")
 
-st.title("📑 PDF & 이미지 합치기 (순서 변경 가능)")
-st.info("파일을 업로드한 뒤, 아래 '순서 지정 박스'에서 순서를 바꿀 수 있습니다.")
+st.title("🖱️ 진짜 PC처럼 합치기")
+st.success("파일을 올린 뒤, 아래 생긴 박스를 마우스로 잡아 끌어서 순서를 바꾸세요!")
 
 # --- 1. 파일 업로드 ---
 uploaded_files = st.file_uploader(
-    "여기에 파일을 드래그하거나 선택하세요", 
+    "파일 추가 (여러 개 선택 가능)", 
     type=["pdf", "png", "jpg", "jpeg"], 
     accept_multiple_files=True
 )
 
 if uploaded_files:
-    # 파일명과 파일 객체를 매칭하는 딕셔너리 생성
+    # 파일명과 실제 파일을 연결하는 딕셔너리 생성
     file_dict = {file.name: file for file in uploaded_files}
+    original_filenames = list(file_dict.keys())
     
-    # --- 2. 순서 변경 기능 (핵심) ---
     st.write("---")
-    st.subheader("🔄 병합 순서 확인 및 변경")
-    st.caption("아래 박스 안의 이름 순서대로 합쳐집니다. 순서를 바꾸려면 x를 눌러 뺐다가 원하는 순서대로 다시 선택하세요.")
+    st.subheader("📋 순서 변경 (드래그 앤 드롭)")
     
-    # 멀티셀렉트 박스를 통해 순서 재배열
-    selected_order = st.multiselect(
-        "최종 병합 순서:",
-        options=file_dict.keys(),
-        default=file_dict.keys() # 기본값은 업로드 순서
-    )
-    
+    # --- 2. 드래그 앤 드롭 인터페이스 (핵심 기능) ---
+    # 마우스로 끌어서 순서를 바꿀 수 있는 리스트를 만듭니다.
+    sorted_filenames = sort_items(original_filenames)
+
     # --- 3. 병합 실행 ---
     if st.button("✨ 이 순서대로 합치기", type="primary"):
-        if not selected_order:
-            st.warning("합칠 파일이 선택되지 않았습니다.")
-        else:
-            try:
-                merger = PdfWriter()
-                target_w, target_h = 595, 842 # 기본 A4
+        try:
+            merger = PdfWriter()
+            target_w, target_h = 595, 842 # 기본 A4
+            
+            # 기준 크기 잡기 (첫 번째 PDF 기준)
+            for name in sorted_filenames:
+                file = file_dict[name]
+                if file.name.lower().endswith(".pdf"):
+                    reader = PdfReader(file)
+                    if len(reader.pages) > 0:
+                        box = reader.pages[0].mediabox
+                        target_w, target_h = int(box.width), int(box.height)
+                        break
+            
+            # 진행바
+            progress_text = "작업 중..."
+            my_bar = st.progress(0, text=progress_text)
+            
+            # 사용자가 정한 순서(sorted_filenames)대로 합치기
+            for i, name in enumerate(sorted_filenames):
+                file = file_dict[name]
+                file.seek(0) # 파일 초기화
                 
-                # 기준 크기 잡기 (선택된 파일 중 첫 번째 PDF 기준)
-                for name in selected_order:
-                    file = file_dict[name]
-                    if file.name.lower().endswith(".pdf"):
-                        reader = PdfReader(file)
-                        if len(reader.pages) > 0:
-                            box = reader.pages[0].mediabox
-                            target_w, target_h = int(box.width), int(box.height)
-                            break
+                ext = name.split('.')[-1].lower()
                 
-                # 진행률 바
-                progress_text = "파일 합치는 중..."
-                my_bar = st.progress(0, text=progress_text)
+                if ext == 'pdf':
+                    merger.append(file)
                 
-                # 사용자가 지정한 순서(selected_order)대로 반복
-                for i, name in enumerate(selected_order):
-                    file = file_dict[name]
-                    file.seek(0) # 파일 포인터 초기화 (중요)
+                elif ext in ['png', 'jpg', 'jpeg']:
+                    img = Image.open(file).convert('RGB')
+                    canvas = Image.new('RGB', (target_w, target_h), (255, 255, 255))
+                    img_fitted = ImageOps.contain(img, (target_w, target_h))
                     
-                    ext = name.split('.')[-1].lower()
+                    paste_x = (target_w - img_fitted.width) // 2
+                    paste_y = (target_h - img_fitted.height) // 2
+                    canvas.paste(img_fitted, (paste_x, paste_y))
                     
-                    if ext == 'pdf':
-                        merger.append(file)
-                    
-                    elif ext in ['png', 'jpg', 'jpeg']:
-                        img = Image.open(file).convert('RGB')
-                        # 캔버스 생성 및 중앙 정렬
-                        canvas = Image.new('RGB', (target_w, target_h), (255, 255, 255))
-                        img_fitted = ImageOps.contain(img, (target_w, target_h))
-                        
-                        paste_x = (target_w - img_fitted.width) // 2
-                        paste_y = (target_h - img_fitted.height) // 2
-                        canvas.paste(img_fitted, (paste_x, paste_y))
-                        
-                        img_bytes = io.BytesIO()
-                        canvas.save(img_bytes, format='PDF')
-                        merger.append(img_bytes)
-                    
-                    # 진행률 업데이트
-                    my_bar.progress((i + 1) / len(selected_order), text=progress_text)
+                    img_bytes = io.BytesIO()
+                    canvas.save(img_bytes, format='PDF')
+                    merger.append(img_bytes)
+                
+                my_bar.progress((i + 1) / len(sorted_filenames), text=progress_text)
 
-                # 결과 저장
-                output = io.BytesIO()
-                merger.write(output)
-                merger.close()
-                my_bar.empty()
-                
-                st.balloons()
-                st.success("완료! 순서대로 합쳐졌습니다.")
-                
-                st.download_button(
-                    label="📥 결과물 다운로드",
-                    data=output.getvalue(),
-                    file_name="merged_ordered.pdf",
-                    mime="application/pdf"
-                )
-                
-            except Exception as e:
-                st.error(f"오류가 발생했습니다: {e}")
+            # 결과 저장
+            output = io.BytesIO()
+            merger.write(output)
+            merger.close()
+            my_bar.empty()
+            
+            st.balloons()
+            st.success("완료! 순서대로 합쳐졌습니다.")
+            
+            st.download_button(
+                label="📥 다운로드",
+                data=output.getvalue(),
+                file_name="merged_result.pdf",
+                mime="application/pdf"
+            )
+            
+        except Exception as e:
+            st.error(f"오류: {e}")
