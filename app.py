@@ -7,7 +7,7 @@ from streamlit_sortables import sort_items # 순서 변경 도구 추가
 # --- 페이지 설정 ---
 st.set_page_config(page_title="드래그로 순서 변경", page_icon="🖱️")
 
-st.title("🖱️ 진짜 PC처럼 합치기")
+st.title("🖱️ PDF & 이미지 통합")
 st.success("파일을 올린 뒤, 아래 생긴 박스를 마우스로 잡아 끌어서 순서를 바꾸세요!")
 
 # --- 1. 파일 업로드 ---
@@ -92,3 +92,4 @@ if uploaded_files:
             
         except Exception as e:
             st.error(f"오류: {e}")
+
